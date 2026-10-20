@@ -265,6 +265,25 @@ class TestBuildSkillsSystemPrompt:
 
 
 
+    @pytest.mark.parametrize("oneshot", [False, True])
+    def test_skill_guidance_respects_task_triggers_and_user_instructions(
+        self, monkeypatch, tmp_path, oneshot
+    ):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("HERMES_SINGLE_QUERY_SESSION", "1" if oneshot else "0")
+        skill = tmp_path / "skills" / "tools" / "search"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            "---\nname: search\ndescription: Use when searching the web.\n---\n"
+        )
+        result = build_skills_system_prompt()
+        assert "Explicit user instructions take precedence over conflicting skill instructions." in result
+        assert "even partially relevant" not in result
+        assert "Err on the side of loading" not in result
+        if not oneshot:
+            assert "whose description or trigger matches the task" in result
+            assert "If no skill matches, proceed without loading one." in result
+
     def test_deduplicates_skills(self, monkeypatch, tmp_path):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         cat_dir = tmp_path / "skills" / "tools"

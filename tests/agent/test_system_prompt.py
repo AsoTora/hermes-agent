@@ -349,6 +349,21 @@ class TestExecutionGuidanceInjection:
         )
         return _stable_prompt(agent)
 
+    @pytest.mark.parametrize("model", [
+        "openai/gpt-6.1-sol", "openai/gpt-5.5", "deepseek/deepseek-v4-pro",
+    ])
+    def test_guidance_bounds_approval_and_reverification(self, model):
+        stable = self._prompt(model)
+        assert "destructive, irreversible, or shared/external side effects" in stable
+        assert "unless already authorized" in stable
+        assert "Do not ask again for routine reversible work within the user's request." in stable
+        assert "Run checks appropriate to the change and complete required checks." in stable
+        assert "Repeat or broaden verification only for new changes, failures, or unresolved concerns." in stable
+        assert "Reuse already-confirmed results unless the underlying state has changed." in stable
+        # Preserve completion and external read-back safeguards.
+        assert "every named acceptance criterion is verified" in stable
+        assert "by reading back the exact target before claiming success" in stable
+
     def test_deepseek_gets_guidance_by_default(self):
         stable = self._prompt("deepseek/deepseek-v4-pro")
         assert "Execution discipline" in stable
