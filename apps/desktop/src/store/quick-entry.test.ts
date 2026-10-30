@@ -41,7 +41,7 @@ const connect: QuickComposerEvent = {
 }
 
 describe('quickComposerReducer', () => {
-  it('starts visible, empty, DISCONNECTED, and targeting the current chat', () => {
+  it('starts visible, empty, DISCONNECTED, and targeting a new session', () => {
     expect(initialQuickComposerState).toEqual({
       connected: false,
       draft: '',
@@ -51,7 +51,7 @@ describe('quickComposerReducer', () => {
       pendingSubmitId: null,
       sessions: [],
       submitting: false,
-      target: QUICK_TARGET_CURRENT,
+      target: QUICK_TARGET_NEW,
       unknownSubmitId: null,
       visible: true
     })
@@ -60,7 +60,7 @@ describe('quickComposerReducer', () => {
   it('submit sends the trimmed draft but waits for acknowledgement to clear and hide', () => {
     const { sent, state } = run([connect, { draft: '  ship it  ', type: 'edit' }, { submitId: 1, type: 'submit' }])
 
-    expect(sent).toEqual([{ target: QUICK_TARGET_CURRENT, text: 'ship it' }])
+    expect(sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'ship it' }])
     expect(state.draft).toBe('  ship it  ')
     expect(state.submitting).toBe(true)
     expect(state.visible).toBe(true)
@@ -112,7 +112,13 @@ describe('quickComposerReducer', () => {
       { submitId: 1, type: 'submit' }
     ])
 
-    const current = run([connect, { draft: 'current here', type: 'edit' }, { submitId: 2, type: 'submit' }])
+    const current = run([
+      connect,
+      { target: QUICK_TARGET_CURRENT, type: 'target' },
+      connect,
+      { draft: 'current here', type: 'edit' },
+      { submitId: 2, type: 'submit' }
+    ])
 
     expect(resumed.sent).toEqual([{ target: 's2', text: 'resume here' }])
     expect(current.sent).toEqual([{ target: QUICK_TARGET_CURRENT, text: 'current here' }])
@@ -139,7 +145,7 @@ describe('quickComposerReducer', () => {
 
     // The gateway comes back: the same draft now sends.
     const after = run([connect, { type: 'submit' }], state)
-    expect(after.sent).toEqual([{ target: QUICK_TARGET_CURRENT, text: 'hello?' }])
+    expect(after.sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'hello?' }])
   })
 
   it('a disconnect push mid-composition keeps the draft but blocks the send', () => {
@@ -158,7 +164,7 @@ describe('quickComposerReducer', () => {
   it('a second submit while already submitting cannot double-send', () => {
     const { sent, state } = run([connect, { draft: 'hello', type: 'edit' }, { type: 'submit' }, { type: 'submit' }])
 
-    expect(sent).toEqual([{ target: QUICK_TARGET_CURRENT, text: 'hello' }])
+    expect(sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'hello' }])
     expect(state.submitting).toBe(true)
   })
 
@@ -184,15 +190,62 @@ describe('quickComposerReducer', () => {
     expect(sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'fresh start' }])
   })
 
-  it('a picked session that vanishes from the pushed list falls back to current', () => {
+  it('a picked session that vanishes from the pushed list falls back to a new session', () => {
     const { state } = run([
       connect,
       { target: 's2', type: 'target' },
       { connected: true, sessions: [{ id: 's1', title: 'Fix the build' }], type: 'state' }
     ])
 
-    expect(state.target).toBe(QUICK_TARGET_CURRENT)
+    expect(state.target).toBe(QUICK_TARGET_NEW)
   })
+
+  it.each(['blur', 'dismiss', 'shown'] as const)('%s resets an explicit current-chat choice to a new session', type => {
+    const { state } = run([connect, { target: QUICK_TARGET_CURRENT, type: 'target' }, { type }])
+
+    expect(state.target).toBe(QUICK_TARGET_NEW)
+    const next = run([{ type: 'shown' }, { draft: 'fresh', type: 'edit' }, { submitId: 1, type: 'submit' }], state)
+    expect(next.sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'fresh' }])
+  })
+
+  it('a disconnected target falls back to a new session without losing the draft', () => {
+    const { state } = run([
+      connect,
+      { target: 's2', type: 'target' },
+      { draft: 'keep me', type: 'edit' },
+      { connected: false, sessions: [], type: 'state' }
+    ])
+
+    expect(state.target).toBe(QUICK_TARGET_NEW)
+    expect(state.draft).toBe('keep me')
+    expect(run([connect, { type: 'submit' }], state).sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'keep me' }])
+  })
+
+  it.each(['pending', 'unknown'] as const)(
+    'dismiss and re-summon preserve an explicit target for a %s submit',
+    outcome => {
+      const events: QuickComposerEvent[] = [
+        connect,
+        { target: QUICK_TARGET_CURRENT, type: 'target' },
+        { draft: 'pending prompt', type: 'edit' },
+        { submitId: 7, type: 'submit' }
+      ]
+
+      if (outcome === 'unknown') {
+        events.push({ message: 'may still be delivered', submitId: 7, type: 'submit-unknown' })
+      }
+
+      events.push({ type: 'dismiss' }, { type: 'shown' }, { submitId: 8, type: 'submit' })
+      const { sent, state } = run(events)
+
+      expect(sent).toEqual([{ target: QUICK_TARGET_CURRENT, text: 'pending prompt' }])
+      expect(state.target).toBe(QUICK_TARGET_CURRENT)
+      expect(state.draft).toBe('pending prompt')
+      expect(state.pendingSubmitId).toBe(outcome === 'pending' ? 7 : null)
+      expect(state.unknownSubmitId).toBe(outcome === 'unknown' ? 7 : null)
+      expect(state.visible).toBe(true)
+    }
+  )
 
   it('a state push that still contains the picked session keeps it', () => {
     const { state } = run([connect, { target: 's1', type: 'target' }, connect])
@@ -210,7 +263,7 @@ describe('quickComposerReducer', () => {
 
     expect(sent).toEqual([])
     expect(state.draft).toBe('')
-    expect(state.target).toBe(QUICK_TARGET_CURRENT)
+    expect(state.target).toBe(QUICK_TARGET_NEW)
     expect(state.visible).toBe(false)
   })
 
@@ -225,7 +278,7 @@ describe('quickComposerReducer', () => {
   it('the blur that follows a submit keeps that submit correlated and delivered', () => {
     const { sent, state } = run([connect, { draft: 'go', type: 'edit' }, { type: 'submit' }, { type: 'blur' }])
 
-    expect(sent).toEqual([{ target: QUICK_TARGET_CURRENT, text: 'go' }])
+    expect(sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'go' }])
     expect(state.draft).toBe('go')
     expect(state.submitting).toBe(true)
     expect(state.visible).toBe(false)
@@ -248,8 +301,8 @@ describe('quickComposerReducer', () => {
     const first = run([connect, { draft: 'one', type: 'edit' }, { type: 'submit' }])
     const second = run([{ type: 'shown' }, { draft: 'two', type: 'edit' }, { type: 'submit' }], first.state)
 
-    expect(first.sent).toEqual([{ target: QUICK_TARGET_CURRENT, text: 'one' }])
-    expect(second.sent).toEqual([{ target: QUICK_TARGET_CURRENT, text: 'two' }])
+    expect(first.sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'one' }])
+    expect(second.sent).toEqual([{ target: QUICK_TARGET_NEW, text: 'two' }])
   })
 
   it('keeps the correlation and draft when dismissed mid-submit', () => {
@@ -447,8 +500,8 @@ describe('quickComposerReducer', () => {
     ])
 
     expect(sent).toEqual([
-      { target: QUICK_TARGET_CURRENT, text: 'first prompt' },
-      { target: QUICK_TARGET_CURRENT, text: 'second prompt' }
+      { target: QUICK_TARGET_NEW, text: 'first prompt' },
+      { target: QUICK_TARGET_NEW, text: 'second prompt' }
     ])
     expect(state.draft).toBe('first prompt')
     expect(state.error).toBe('first failed')

@@ -227,7 +227,7 @@ export const initialQuickComposerState: QuickComposerState = {
   pendingSubmitId: null,
   sessions: [],
   submitting: false,
-  target: QUICK_TARGET_CURRENT,
+  target: QUICK_TARGET_NEW,
   unknownSubmitId: null,
   visible: true
 }
@@ -253,7 +253,7 @@ export function quickComposerReducer(state: QuickComposerState, event: QuickComp
               orphanedFailure: null,
               pendingSubmitId: null,
               submitting: false,
-              target: QUICK_TARGET_CURRENT,
+              target: QUICK_TARGET_NEW,
               unknownSubmitId: null,
               visible: false
             }
@@ -283,7 +283,7 @@ export function quickComposerReducer(state: QuickComposerState, event: QuickComp
           orphanedFailure: null,
           pendingSubmitId: null,
           submitting: false,
-          target: QUICK_TARGET_CURRENT,
+          target: QUICK_TARGET_NEW,
           unknownSubmitId: null,
           visible: true
         }
@@ -292,7 +292,7 @@ export function quickComposerReducer(state: QuickComposerState, event: QuickComp
 
     case 'state': {
       // Adopt the pushed truth. A selected session that no longer exists in the
-      // pushed list must not silently swallow the prompt — fall back to current.
+      // pushed list must not silently swallow the prompt — fall back to a new session.
       const targetStillValid =
         event.connected &&
         (state.target === QUICK_TARGET_CURRENT ||
@@ -305,7 +305,7 @@ export function quickComposerReducer(state: QuickComposerState, event: QuickComp
           ...state,
           connected: event.connected,
           sessions: event.sessions,
-          target: targetStillValid ? state.target : QUICK_TARGET_CURRENT
+          target: targetStillValid ? state.target : QUICK_TARGET_NEW
         }
       }
     }
